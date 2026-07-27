@@ -6,10 +6,24 @@ import toast from "react-hot-toast";
 import { members } from "../data/members";
 import * as faceapi from "face-api.js";
 
+// Rumus Haversine untuk menghitung jarak antar koordinat dalam meter
+function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Radius bumi dalam meter
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  return R * c; 
+}
+
 export default function Home() {
   const [selectedMember, setSelectedMember] = useState("");
   const [status, setStatus] = useState("H"); // Default ke "H" (Hadir)
   const [photo, setPhoto] = useState(null);
+  const [userLocation, setUserLocation] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -55,6 +69,15 @@ export default function Home() {
           videoRef.current.srcObject = stream;
         }
       }, 100);
+      
+      // Ambil lokasi GPS secara background
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => setUserLocation({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          (err) => console.log("GPS tidak diizinkan atau gagal:", err),
+          { enableHighAccuracy: true }
+        );
+      }
       
     } catch (err) {
       console.error("Gagal mengakses kamera:", err);
@@ -105,13 +128,19 @@ export default function Home() {
                       now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
       
       ctx.fillStyle = "rgba(0, 0, 0, 0.5)"; // Latar belakang semi-transparan
-      ctx.fillRect(0, height - 50, width, 50); 
+      ctx.fillRect(0, height - 70, width, 70); 
       
       ctx.fillStyle = "white";
       ctx.textAlign = "right";
       ctx.font = "bold 16px sans-serif";
-      ctx.fillText("KKN DAMARJATI", width - 10, height - 28);
+      ctx.fillText("KKN DAMARJATI", width - 10, height - 48);
+      
       ctx.font = "14px sans-serif";
+      if (userLocation) {
+        ctx.fillText(`GPS: ${userLocation.lat.toFixed(5)}, ${userLocation.lon.toFixed(5)}`, width - 10, height - 28);
+      } else {
+        ctx.fillText("GPS: Mencari lokasi...", width - 10, height - 28);
+      }
       ctx.fillText(timeStr, width - 10, height - 10);
       
       // Kompresi kualitas JPEG (0.6 artinya 60% kualitas)
@@ -133,10 +162,27 @@ export default function Home() {
       return;
     }
     
-    // Foto hanya diwajibkan jika statusnya Hadir (H)
-    if (status === "H" && !photo) {
-      toast.error("Untuk absen Hadir, wajib mengambil foto bukti!");
-      return;
+    // Foto dan Lokasi hanya diwajibkan jika statusnya Hadir (H)
+    if (status === "H") {
+      if (!photo) {
+        toast.error("Untuk absen Hadir, wajib mengambil foto bukti!");
+        return;
+      }
+      
+      if (!userLocation) {
+        toast.error("Sistem sedang melacak lokasi Anda. Pastikan GPS menyala dan izin lokasi diberikan, lalu coba lagi dalam beberapa detik.");
+        return;
+      }
+
+      // Validasi Jarak Geofencing (Maksimal 100 meter dari Posko)
+      const POSKO_LAT = -6.7026771;
+      const POSKO_LON = 110.7472901;
+      const distance = getDistanceFromLatLonInM(userLocation.lat, userLocation.lon, POSKO_LAT, POSKO_LON);
+
+      if (distance > 100) {
+        toast.error(`Anda berada di luar zona absen! Jarak Anda: ${Math.round(distance)} meter dari Posko (Maks 100m). Silakan mendekat ke posko.`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
